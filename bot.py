@@ -28,14 +28,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Инициализируем облачный клиент ИИ вместо Ollama
-if HF_TOKEN:
-    ai_client = OpenAI(
-        base_url="https://huggingface.co",
-        api_key=HF_TOKEN
-    )
-else:
-    ai_client = None
+# Для ИИ нам нужен только токен, отправлять запросы будем напрямую через requests
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 DB_FILE = "database.json"
 users_data = {}
@@ -447,32 +441,43 @@ async def гпт(ctx, *, question: str):
     data = users_data[user_id]
     
     async with ctx.typing():
+        if not HF_TOKEN:
+            await ctx.send("❌ Прости, ИИ сейчас недоступен (не настроен HF_TOKEN на Render).")
+            return
+
+        # Гарантируем, что история — это всегда список
+        if "history" not in data or not isinstance(data["history"], list):
+            data["history"] = []
+
+        # Собираем красивый промпт для Llama 3
+        prompt = f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{AI_PERSONALITY}<|eot_id|>"
+        for msg in data["history"]:
+            if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                prompt += f"<|start_header_id|>{msg['role']}<|end_header_id|>\n\n{msg['content']}<|eot_id|>"
+        prompt += f"<|start_header_id|>user<|end_header_id|>\n\n{question}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+
+        # Прямой и стабильный запрос к Hugging Face API
+        API_URL = "https://huggingface.co"
+        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+        payload = {
+            "inputs": prompt,
+            "parameters": {"max_new_tokens": 300, "temperature": 0.7}
+        }
+
         try:
-            if ai_client is None:
-                await ctx.send("❌ Прости, ИИ сейчас недоступен (не настроен HF_TOKEN).")
-                return
+            import requests
+            # Делаем обычный HTTP запрос вместо вызова библиотеки OpenAI
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+            result = response.json()
+            
+            # Извлекаем текст
+            if isinstance(result, list) and len(result) > 0 and 'generated_text' in result[0]:
+                full_text = result[0]['generated_text']
+                # Отрезаем всё лишнее, оставляя только ответ ассистента
+                answer = full_text.split("<|start_header_id|>assistant<|end_header_id|>\n\n")[-1].replace("<|eot_id|>", "").strip()
+            else:
+                answer = "Не удалось распознать ответ от сервера ИИ."
 
-            # Гарантируем, что история — это всегда список
-            if "history" not in data or not isinstance(data["history"], list):
-                data["history"] = []
-
-            # Формируем контекст для Llama 3
-            messages_to_send = [{"role": "system", "content": AI_PERSONALITY}]
-            for msg in data["history"]:
-                # Проверяем, что внутри истории лежат правильные словари
-                if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                    messages_to_send.append(msg)
-            
-            messages_to_send.append({"role": "user", "content": question})
-            
-            # Делаем запрос к вечной и стабильной модели Meta Llama 3
-            response = ai_client.chat.completions.create(
-                model="meta-llama/Meta-Llama-3-8B-Instruct",
-                messages=messages_to_send,
-                max_tokens=400
-            )
-            answer = response.choices.message.content
-            
             # Сохраняем в память
             data["history"].append({"role": "user", "content": question})
             data["history"].append({"role": "assistant", "content": answer})
@@ -484,11 +489,8 @@ async def гпт(ctx, *, question: str):
             await ctx.send(f"🥥 **Ответ облачного ИИ для {ctx.author.mention}:**\n\n{answer}")
             
         except Exception as e:
-            await ctx.send("❌ Прости, ИИ временно задумался. Память очищена, попробуй еще раз!", delete_after=10)
-            # Если база данных забилась старым некорректным форматом — сбрасываем историю
-            data["history"] = []
-            await save_user_data(user_id)
-            print(f"Ошибка облачного ИИ: {e}")
+            await ctx.send("❌ Прости, облачный ИИ временно задумался. Попробуй еще раз!")
+            print(f"Ошибка ИИ: {e}")
 
 @bot.event
 async def on_command_error(ctx, error):
