@@ -4,21 +4,23 @@ from discord import app_commands
 import random
 import time
 import json
-import os
+import asyncpg
 import os
 from openai import OpenAI
 from flask import Flask
 from threading import Thread
 
-# Пытаемся взять токен из панели Render
+# Пытаемся взять токены из панели Render
 TOKEN = os.getenv("TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN")
+DB_URL = os.getenv("DATABASE_URL")
 
-# Если токена в Render нет (запуск на ПК) — берём его из config.py
+# Если токенов в Render нет (запуск локально на ПК) — берём их из config.py
 if not TOKEN:
     import config
     TOKEN = config.TOKEN
-    HF_TOKEN = getattr(config, "HF_TOKEN", None) # если добавите в config.py позже
+    HF_TOKEN = getattr(config, "HF_TOKEN", None)
+    DB_URL = getattr(config, "DATABASE_URL", None)
 
 YOUR_GUILD_ID = 1280747209247428693
 
