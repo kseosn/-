@@ -5,24 +5,35 @@ import random
 import time
 import json
 import os
-import ollama
+import os
+from openai import OpenAI
 from flask import Flask
 from threading import Thread
 
 # Пытаемся взять токен из панели Render
 TOKEN = os.getenv("TOKEN")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 # Если токена в Render нет (запуск на ПК) — берём его из config.py
 if not TOKEN:
     import config
     TOKEN = config.TOKEN
+    HF_TOKEN = getattr(config, "HF_TOKEN", None) # если добавите в config.py позже
 
 YOUR_GUILD_ID = 1280747209247428693
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-ai_client = ollama
+
+# Инициализируем облачный клиент ИИ вместо Ollama
+if HF_TOKEN:
+    ai_client = OpenAI(
+        base_url="https://huggingface.co",
+        api_key=HF_TOKEN
+    )
+else:
+    ai_client = None
 
 DB_FILE = "database.json"
 users_data = {}
@@ -432,21 +443,37 @@ async def гпт(ctx, *, question: str):
     user_id = ctx.author.id
     update_passive_income(user_id)
     data = users_data[user_id]
+    
     async with ctx.typing():
         try:
+            # Формируем историю сообщений
             messages_to_send = [{"role": "system", "content": AI_PERSONALITY}]
-            for msg in data["history"]: messages_to_send.append(msg)
+            for msg in data["history"]:
+                messages_to_send.append(msg)
             messages_to_send.append({"role": "user", "content": question})
-            response = ai_client.chat(model="llama3", messages=messages_to_send)
-            answer = response["message"]["content"]
+            
+            # Делаем запрос в облачный роутер Hugging Face
+            response = ai_client.chat.completions.create(
+                model="moonshotai/Kimi-K2-Instruct-0905",
+                messages=messages_to_send,
+                max_tokens=400
+            )
+            answer = response.choices[0].message.content
+            
+            # Сохраняем ответ в историю
             data["history"].append({"role": "user", "content": question})
             data["history"].append({"role": "assistant", "content": answer})
-            if len(data["history"]) > 12: data["history"] = data["history"][-12:]
+            
+            # Ограничиваем историю последними 12 сообщениями
+            if len(data["history"]) > 12:
+                data["history"] = data["history"][-12:]
+                
             save_data()
-            await ctx.send(f"🥥 **Ответ локального ИИ для {ctx.author.mention}:**\n\n{answer}")
+            await ctx.send(f"🥥 **Ответ облачного ИИ для {ctx.author.mention}:**\n\n{answer}")
+            
         except Exception as e:
             await ctx.send("❌ Прости, ИИ сейчас задумался. Попробуй еще раз!", delete_after=10)
-            print(f"Ошибка локального ИИ: {e}")
+            print(f"Ошибка облачного ИИ: {e}")
 
 @bot.event
 async def on_command_error(ctx, error):
