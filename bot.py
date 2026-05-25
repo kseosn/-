@@ -6,10 +6,17 @@ import time
 import json
 import os
 import ollama
-import config
+from flask import Flask
+from threading import Thread
 
-# НАСТРОЙКА БОТА
-TOKEN = config.TOKEN
+# Пытаемся взять токен из панели Render
+TOKEN = os.getenv("TOKEN")
+
+# Если токена в Render нет (запуск на ПК) — берём его из config.py
+if not TOKEN:
+    import config
+    TOKEN = config.TOKEN
+
 YOUR_GUILD_ID = 1280747209247428693
 
 intents = discord.Intents.default()
@@ -799,5 +806,21 @@ async def slash_slots(interaction: discord.Interaction, ставка: float):
             
         embed.set_footer(text=f"Твой текущий баланс: {int(data['баланс'])} 🥥")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Бот запущен и работает!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# Запускаем веб-сервер перед стартом бота
+keep_alive()
 
 bot.run(TOKEN)
