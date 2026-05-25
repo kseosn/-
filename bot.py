@@ -27,7 +27,6 @@ YOUR_GUILD_ID = 1280747209247428693
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Для ИИ нам нужен только токен, отправлять запросы будем напрямую через requests
