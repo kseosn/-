@@ -443,38 +443,51 @@ async def дуэль(ctx, member: discord.Member, ставка: float):
 @bot.command()
 async def гпт(ctx, *, question: str):
     user_id = ctx.author.id
-    update_passive_income(user_id)
+    await update_passive_income(user_id)
     data = users_data[user_id]
     
     async with ctx.typing():
         try:
-            # Формируем историю сообщений
+            if ai_client is None:
+                await ctx.send("❌ Прости, ИИ сейчас недоступен (не настроен HF_TOKEN).")
+                return
+
+            # Гарантируем, что история — это всегда список
+            if "history" not in data or not isinstance(data["history"], list):
+                data["history"] = []
+
+            # Формируем контекст для Llama 3
             messages_to_send = [{"role": "system", "content": AI_PERSONALITY}]
             for msg in data["history"]:
-                messages_to_send.append(msg)
+                # Проверяем, что внутри истории лежат правильные словари
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    messages_to_send.append(msg)
+            
             messages_to_send.append({"role": "user", "content": question})
             
-            # Делаем запрос в облачный роутер Hugging Face
+            # Делаем запрос к вечной и стабильной модели Meta Llama 3
             response = ai_client.chat.completions.create(
-                model="moonshotai/Kimi-K2-Instruct-0905",
+                model="meta-llama/Meta-Llama-3-8B-Instruct",
                 messages=messages_to_send,
                 max_tokens=400
             )
-            answer = response.choices[0].message.content
+            answer = response.choices.message.content
             
-            # Сохраняем ответ в историю
+            # Сохраняем в память
             data["history"].append({"role": "user", "content": question})
             data["history"].append({"role": "assistant", "content": answer})
             
-            # Ограничиваем историю последними 12 сообщениями
-            if len(data["history"]) > 12:
-                data["history"] = data["history"][-12:]
+            if len(data["history"]) > 10:
+                data["history"] = data["history"][-10:]
                 
-            save_data()
+            await save_user_data(user_id)
             await ctx.send(f"🥥 **Ответ облачного ИИ для {ctx.author.mention}:**\n\n{answer}")
             
         except Exception as e:
-            await ctx.send("❌ Прости, ИИ сейчас задумался. Попробуй еще раз!", delete_after=10)
+            await ctx.send("❌ Прости, ИИ временно задумался. Память очищена, попробуй еще раз!", delete_after=10)
+            # Если база данных забилась старым некорректным форматом — сбрасываем историю
+            data["history"] = []
+            await save_user_data(user_id)
             print(f"Ошибка облачного ИИ: {e}")
 
 @bot.event
